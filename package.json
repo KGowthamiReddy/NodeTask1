@@ -1,7 +1,7 @@
 {
   "name": "nodejs",
   "version": "1.0.0",
-  "description": "",
+  "description": "Write a simple backend to accept team entries for a fantasy cricket app (similar to Dream11) and process the results based on match results. Use Node.js backend with express for API and MongoDB for database. Core packages are pre-installed with a dev database connection to MongoDB Atlas. You are free to add additional libraries for validation, etc.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -11,6 +11,9 @@
   "license": "ISC",
   "dependencies": {
     "@types/node": "^18.0.6",
+    "express": "^4.19.2",
+    "mongodb": "^5.9.2",
+    "mongoose": "^8.3.3",
     "node-fetch": "^3.2.6"
   }
 }
