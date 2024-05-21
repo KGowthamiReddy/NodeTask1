@@ -18,7 +18,7 @@ exports.validateTeamEntry = async (req, res, next) => {
     // Check if all players exist in the database
     const existingPlayers = await Player.find({ name: { $in: players } });
     const missingPlayers = players.filter(player => !existingPlayers.some(p => p.name === player));
-    console.log('==== missingPlayers ====', missingPlayers);
+    
     if (missingPlayers.length > 0) {
       return res.status(400).json({ error: `Players not found: ${missingPlayers.join(', ')}` });
     }

@@ -1,92 +1,93 @@
-// controllers/matchController.js
+//controllers/matchController.js
 const fs = require('fs');
+const path = require('path');
 const Team = require('../models/team');
 const Player = require('../models/player');
+
+const calculateBattingPoints = (runs, playerType) => {
+  let points = runs; // 1 point per run
+  if (runs >= 4) points += 1; // Boundary bonus
+  if (runs >= 6) points += 2; // Six bonus
+  if (runs >= 30) points += 4; // 30-run bonus
+  if (runs >= 50) points += 8; // Half-century bonus
+  if (runs >= 100) points += 16; // Century bonus
+  if (runs === 0 && ['BAT', 'WK', 'AR'].includes(playerType)) {
+    points -= 2; // Dismissal for a duck
+  }
+  return points;
+};
+
+const calculateBowlingPoints = (dismissalInfo) => {
+  if (!dismissalInfo) return 0;
+
+  let points = 0;
+  if (dismissalInfo.includes('wicket')) {
+    points += 25; // Wicket
+    if (dismissalInfo === 'bowled' || dismissalInfo === 'lbw') {
+      points += 8; // Bonus for LBW / Bowled
+    }
+  }
+  return points;
+};
+
+const calculateFieldingPoints = (dismissalInfo) => {
+  if (!dismissalInfo) return 0;
+
+  let points = 0;
+  if (dismissalInfo.includes('caught')) points += 8; // Catch
+  if (dismissalInfo.includes('stumped')) points += 12; // Stumping
+  if (dismissalInfo.includes('run out')) points += 6; // Run out
+  return points;
+};
 
 exports.processMatchResult = async (req, res) => {
   try {
     // Read match result from data/match.json
-    const matchResult = JSON.parse(fs.readFileSync('./data/match.json', 'utf8'));
+    const matchResultPath = path.join(__dirname, '../data/match.json');
+    const matchResult = JSON.parse(fs.readFileSync(matchResultPath, 'utf8'));
 
-    // Iterate through each ball in the match result
+    // Fetch teams from the database
+    const teams = await Team.find();
+
+    // Reset team points
+    for (const team of teams) {
+      team.points = 0;
+    }
+
+    // Process each ball in the match result
     for (const ball of matchResult) {
-      // Extract relevant information from the ball
       const { player, runs, dismissalInfo } = ball;
 
-      // Find the player in the database
-      const playerInDB = await Player.findOne({ name: player });
+      for (const team of teams) {
+        const playerInTeam = team.players.find(p => p.name === player);
 
-      if (playerInDB) {
-        // Update points for batting actions
-        if (runs >= 0) {
-          let battingPoints = runs; // Run
-          if (runs >= 4) battingPoints += 1; // Boundary Bonus
-          if (runs >= 6) battingPoints += 2; // Six Bonus
-          if (runs >= 30) battingPoints += 4; // 30 Run Bonus
-          if (runs >= 50) battingPoints += 8; // Half-century Bonus
-          if (runs >= 100) battingPoints += 16; // Century Bonus
+        if (playerInTeam) {
+          // Calculate points for this player
+          const battingPoints = calculateBattingPoints(runs, playerInTeam.type);
+          const bowlingPoints = calculateBowlingPoints(dismissalInfo);
+          const fieldingPoints = calculateFieldingPoints(dismissalInfo);
 
-          // Update points for dismissal for a duck
-          if (runs === 0) {
-            if (playerInDB.type === 'WK' || playerInDB.type === 'BAT' || playerInDB.type === 'AR') {
-              battingPoints -= 2;
-            }
-          }
+          console.log(`Player: ${player}, Batting: ${battingPoints}, Bowling: ${bowlingPoints}, Fielding: ${fieldingPoints}`);
 
-          // Find the team containing the player
-          const team = await Team.findOne({ 'players.name': playerInDB.name });
-          console.log('***** team ****')
-
-          // Update the team's points
-          if (team) {
-            team.points += battingPoints;
-            await team.save();
-          }
-        }
-
-        // Update points for bowling actions
-        if (dismissalInfo && dismissalInfo.includes('wicket')) {
-          let bowlingPoints = 25; // Wicket
-
-          // Check for bonus points
-          if (dismissalInfo === 'bowled' || dismissalInfo === 'lbw') {
-            bowlingPoints += 8; // Bonus (LBW / Bowled)
-          }
-
-          // Check for multiple wicket bonus
-          const team = await Team.findOne({ 'players.name': playerInDB.name });
-          if (team) {
-            const bowlersInTeam = team.players.filter(p => p.name !== playerInDB.name && p.type === 'BWL').length;
-            if (bowlersInTeam >= 3 && bowlersInTeam < 4) bowlingPoints += 4; // 3 Wicket Bonus
-            else if (bowlersInTeam >= 4 && bowlersInTeam < 5) bowlingPoints += 8; // 4 Wicket Bonus
-            else if (bowlersInTeam >= 5) bowlingPoints += 16; // 5 Wicket Bonus
-          }
-
-          // Update the team's points
-          if (team) {
-            team.points += bowlingPoints;
-            await team.save();
-          }
-        }
-
-        // Update points for fielding actions
-        if (dismissalInfo && (dismissalInfo.includes('caught') || dismissalInfo.includes('stumped') || dismissalInfo.includes('run out'))) {
-          let fieldingPoints = 8; // Catch
-
-          // Check for multiple catches bonus
-          const team = await Team.findOne({ 'players.name': playerInDB.name });
-          if (team) {
-            const fieldersInTeam = team.players.filter(p => p.name !== playerInDB.name).length;
-            if (fieldersInTeam >= 3) fieldingPoints += 4; // 3 Catch Bonus
-          }
-
-          // Update the team's points
-          if (team) {
-            team.points += fieldingPoints;
-            await team.save();
-          }
+          team.points += battingPoints + bowlingPoints + fieldingPoints;
         }
       }
+    }
+
+    // Apply captain and vice-captain multipliers
+    for (const team of teams) {
+      const captain = team.players.find(p => p.name === team.captain);
+      const viceCaptain = team.players.find(p => p.name === team.viceCaptain);
+
+      if (captain) {
+        team.points += captain.points; // Add captain's points again for 2x
+      }
+
+      if (viceCaptain) {
+        team.points += Math.floor(viceCaptain.points * 0.5); // Add half of vice-captain's points for 1.5x
+      }
+
+      await team.save();
     }
 
     res.status(200).json({ message: 'Match result processed successfully' });
